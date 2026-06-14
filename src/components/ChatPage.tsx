@@ -5,6 +5,7 @@ import { getWorld } from '../worlds';
 import { storage } from '../utils/storage';
 import { streamChat } from '../utils/ai';
 import { parseUnlocks, cleanForDisplay } from '../utils/unlock';
+import { buildCompanionSummary, calculateFamiliarityGain, extractCompanionTopics } from '../utils/companionship';
 import { ChatBubble } from './ChatBubble';
 import { EncyclopediaPanel } from './EncyclopediaPanel';
 import { UnlockToast } from './UnlockToast';
@@ -40,6 +41,9 @@ export function ChatPage({ worldId, onBack, onOpenSettings }: Props) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionStartRef = useRef(Date.now());
+  const sessionUnlockedRef = useRef(new Set<string>());
+  const sessionFinalizedRef = useRef(false);
 
   // Auto-scroll
   useEffect(() => {
@@ -54,11 +58,57 @@ export function ChatPage({ worldId, onBack, onOpenSettings }: Props) {
   const triggerUnlock = useCallback((card: KnowledgeCard) => {
     if (unlockedIds.has(card.id)) return;
     storage.addUnlocked(worldId, card.id);
+    sessionUnlockedRef.current.add(card.id);
     setUnlockedIds(prev => new Set([...prev, card.id]));
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setNewUnlock(card);
     toastTimerRef.current = setTimeout(() => setNewUnlock(null), 4000);
   }, [unlockedIds, worldId]);
+
+  const finalizeCompanionSession = useCallback(() => {
+    if (sessionFinalizedRef.current) return;
+    sessionFinalizedRef.current = true;
+
+    const durationMs = Date.now() - sessionStartRef.current;
+    const unlockedCards = world.knowledgeCards.filter(card => unlockedIds.has(card.id));
+    const topics = extractCompanionTopics({ messages, unlockedCards });
+    const userMessageCount = messages.filter(message => message.role === 'user').length;
+    const unlockCount = sessionUnlockedRef.current.size;
+    const familiarityGain = calculateFamiliarityGain({
+      durationMs,
+      userMessageCount,
+      unlockCount,
+    });
+    const familiarityAfter = storage.addFamiliarity(worldId, familiarityGain);
+    const summary = buildCompanionSummary({
+      topics,
+      durationMs,
+      familiarityGain,
+      familiarityAfter,
+      unlockCount,
+    });
+
+    storage.addCompanionLog(worldId, {
+      id: crypto.randomUUID(),
+      worldId,
+      worldName: world.name,
+      npcName: world.npcName,
+      startedAt: sessionStartRef.current,
+      endedAt: Date.now(),
+      durationMs,
+      topics,
+      summary,
+      familiarityGain,
+      familiarityAfter,
+      unlockCount,
+    });
+  }, [messages, unlockedIds, world, worldId]);
+
+  useEffect(() => {
+    return () => {
+      finalizeCompanionSession();
+    };
+  }, [finalizeCompanionSession]);
 
   async function sendMessage() {
     const text = input.trim();
@@ -149,7 +199,10 @@ export function ChatPage({ worldId, onBack, onOpenSettings }: Props) {
         }}
       >
         <button
-          onClick={onBack}
+          onClick={() => {
+            finalizeCompanionSession();
+            onBack();
+          }}
           className="flex items-center gap-2 text-slate-400 hover:text-slate-200
                      transition-colors text-sm font-mono group"
         >
@@ -189,6 +242,17 @@ export function ChatPage({ worldId, onBack, onOpenSettings }: Props) {
             <BookOpen size={13} />
             图鉴 {unlockedIds.size}/{world.knowledgeCards.length}
           </button>
+          <div
+            className="hidden sm:flex flex-col items-end px-3 py-1.5 rounded-lg border text-xs font-mono"
+            style={{
+              color: world.primaryColor,
+              borderColor: world.primaryColor + '22',
+              background: world.primaryColor + '08',
+            }}
+          >
+            <span>熟悉度</span>
+            <span className="text-slate-200">{storage.getFamiliarity(worldId)}</span>
+          </div>
           <button
             onClick={onOpenSettings}
             className="w-8 h-8 rounded-lg flex items-center justify-center

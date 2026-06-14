@@ -1,13 +1,15 @@
 import { motion } from 'framer-motion';
 import type { WorldConfig } from '../types';
+import { getFamiliarityLabel } from '../utils/companionship';
 
 interface Props {
   world: WorldConfig;
   unlockedCount: number;
+  familiarity: number;
   onClick: () => void;
 }
 
-export function WorldCard({ world, unlockedCount, onClick }: Props) {
+export function WorldCard({ world, unlockedCount, familiarity, onClick }: Props) {
   const locked = !world.available;
   const total = world.knowledgeCards.length;
 
@@ -99,6 +101,12 @@ export function WorldCard({ world, unlockedCount, onClick }: Props) {
                   boxShadow: `0 0 8px ${world.primaryColor}`,
                 }}
               />
+            </div>
+            <div className="flex justify-between text-xs font-mono text-slate-500">
+              <span>熟悉度</span>
+              <span style={{ color: world.primaryColor }}>
+                {getFamiliarityLabel(familiarity)} · {familiarity}
+              </span>
             </div>
           </div>
         )}

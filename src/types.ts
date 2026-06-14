@@ -5,6 +5,27 @@ export interface Message {
   timestamp: number;
 }
 
+export interface CompanionLog {
+  id: string;
+  worldId: string;
+  worldName: string;
+  npcName: string;
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  topics: string[];
+  summary: string;
+  familiarityGain: number;
+  familiarityAfter: number;
+  unlockCount: number;
+}
+
+export interface FamiliarityState {
+  worldId: string;
+  points: number;
+  updatedAt: number;
+}
+
 export type CardRarity = 'common' | 'rare' | 'legendary';
 
 export interface KnowledgeCard {

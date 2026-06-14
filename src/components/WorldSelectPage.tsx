@@ -1,8 +1,10 @@
 import { motion } from 'framer-motion';
-import { Settings } from 'lucide-react';
+import { Clock3, Settings } from 'lucide-react';
+import { useState } from 'react';
 import { WORLDS } from '../worlds';
 import { storage } from '../utils/storage';
 import { ParticleBackground } from './ParticleBackground';
+import { CompanionJournalPanel } from './CompanionJournalPanel';
 import { WorldCard } from './WorldCard';
 
 interface Props {
@@ -11,6 +13,9 @@ interface Props {
 }
 
 export function WorldSelectPage({ onSelectWorld, onOpenSettings }: Props) {
+  const [showJournal, setShowJournal] = useState(false);
+  const [activeWorldId, setActiveWorldId] = useState(() => WORLDS.find(world => world.available)?.id ?? WORLDS[0]?.id ?? '');
+
   return (
     <div className="relative min-h-screen bg-space-950 flex flex-col items-center justify-center p-8 overflow-hidden">
       <ParticleBackground />
@@ -46,7 +51,33 @@ export function WorldSelectPage({ onSelectWorld, onOpenSettings }: Props) {
           <p className="text-slate-500 text-sm mt-3 font-mono tracking-widest">
             — 选择一个时间坐标 —
           </p>
+          <p className="text-slate-600 text-xs mt-2 font-mono">
+            每次退出对话后，系统都会自动留下陪伴日志。
+          </p>
         </motion.div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowJournal(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-mono border transition-all duration-200 hover:scale-105"
+            style={{
+              color: '#f8fafc',
+              borderColor: 'rgba(6,182,212,0.35)',
+              background: 'rgba(6,182,212,0.08)',
+              boxShadow: '0 0 18px rgba(6,182,212,0.12)',
+            }}
+          >
+            <Clock3 size={15} />
+            陪伴日志
+          </button>
+          <button
+            onClick={onOpenSettings}
+            className="text-slate-700 hover:text-slate-400 transition-colors"
+            title="API 设置"
+          >
+            <Settings size={14} />
+          </button>
+        </div>
 
         {/* World Cards */}
         <div className="flex flex-wrap justify-center gap-6 w-full">
@@ -60,6 +91,7 @@ export function WorldSelectPage({ onSelectWorld, onOpenSettings }: Props) {
               <WorldCard
                 world={world}
                 unlockedCount={storage.getUnlocked(world.id).length}
+                familiarity={storage.getFamiliarity(world.id)}
                 onClick={() => onSelectWorld(world.id)}
               />
             </motion.div>
@@ -74,17 +106,18 @@ export function WorldSelectPage({ onSelectWorld, onOpenSettings }: Props) {
           className="flex items-center gap-4"
         >
           <span className="text-slate-700 text-xs font-mono tracking-widest">
-            聊天 · 探索 · 解锁图鉴 · 无任务 · 无剧情
+            聊天 · 陪伴日志 · 熟悉度 · 解锁图鉴 · 无任务 · 无剧情
           </span>
-          <button
-            onClick={onOpenSettings}
-            className="text-slate-700 hover:text-slate-400 transition-colors"
-            title="API 设置"
-          >
-            <Settings size={14} />
-          </button>
         </motion.div>
       </div>
+
+      {showJournal && (
+        <CompanionJournalPanel
+          activeWorldId={activeWorldId}
+          onActiveWorldChange={setActiveWorldId}
+          onClose={() => setShowJournal(false)}
+        />
+      )}
     </div>
   );
 }
