@@ -11,55 +11,54 @@ export function ChatBubble({ message, world, isStreaming }: Props) {
 
   return (
     <div className={`flex items-end gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'} animate-slide-up`}>
-      {/* Avatar */}
-      {!isUser && (
-        <div
-          className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-base border"
-          style={{
-            color: world.primaryColor,
-            borderColor: world.primaryColor + '60',
-            background: world.primaryColor + '10',
-            boxShadow: `0 0 10px ${world.glowColor}`,
-          }}
-        >
-          {world.npcAvatar}
-        </div>
-      )}
-
-      {isUser && (
-        <div className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center
-                        text-xs font-orbitron bg-slate-700 border border-slate-600 text-slate-300">
-          你
-        </div>
-      )}
-
-      {/* Bubble */}
       <div
-        className={`max-w-[72%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap
-                    ${isUser ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-        style={
-          isUser
+        className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border text-sm"
+        style={isUser
+          ? {
+              color: '#dbeafe',
+              borderColor: 'rgba(148,163,184,0.35)',
+              background: 'linear-gradient(135deg, rgba(51,65,85,0.85), rgba(15,23,42,0.9))',
+            }
+          : {
+              color: world.primaryColor,
+              borderColor: world.primaryColor + '66',
+              background: `radial-gradient(circle at 40% 35%, ${world.primaryColor}24, rgba(10,22,40,0.95))`,
+              boxShadow: `0 0 18px ${world.glowColor}`,
+            }}
+      >
+        {isUser ? '你' : world.npcIcon}
+      </div>
+
+      <div className={`max-w-[min(74%,760px)] ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-1.5`}>
+        <div className={`font-mono text-[11px] ${isUser ? 'text-slate-600' : 'text-slate-500'}`}>
+          {isUser ? '访客' : `${world.npcName} · ${world.era}`}
+        </div>
+        <div
+          className={`whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-7 shadow-2xl ${
+            isUser ? 'rounded-br-md' : 'rounded-bl-md'
+          }`}
+          style={isUser
             ? {
-                background: '#1e293b',
-                border: '1px solid #334155',
-                color: '#cbd5e1',
+                background: 'linear-gradient(135deg, rgba(30,41,59,0.96), rgba(15,23,42,0.96))',
+                border: '1px solid rgba(148,163,184,0.18)',
+                color: '#dbe4f0',
               }
             : {
-                background: world.primaryColor + '0d',
+                background: `linear-gradient(135deg, rgba(10,22,40,0.96), ${world.primaryColor}10)`,
                 border: `1px solid ${world.primaryColor}30`,
                 color: '#e2e8f0',
-                boxShadow: `0 0 16px ${world.glowColor}`,
-              }
-        }
-      >
-        {message.content || (
-          <span className="opacity-40">
-            {isStreaming ? '▋' : '…'}
-          </span>
-        )}
-        {isStreaming && message.content && (
-          <span className="inline-block w-[2px] h-4 ml-0.5 bg-current align-middle animate-pulse" />
-        )}
+                boxShadow: `0 12px 34px rgba(0,0,0,0.28), 0 0 22px ${world.glowColor}`,
+              }}
+        >
+          {message.content || (
+            <span className="opacity-50">
+              {isStreaming ? '正在回应...' : '...'}
+            </span>
+          )}
+          {isStreaming && message.content && (
+            <span className="ml-1 inline-block h-4 w-[2px] animate-pulse bg-current align-middle" />
+          )}
+        </div>
       </div>
     </div>
   );

@@ -5,6 +5,16 @@
 /* ── Global ── */
 *, *::before, *::after { box-sizing: border-box; }
 
+html {
+  font-size: 87.5%;
+}
+
+@media (max-width: 640px) {
+  html {
+    font-size: 93.75%;
+  }
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
@@ -38,3 +48,32 @@ html, body, #root {
 .animate-float      { animation: float      6s  ease-in-out infinite; }
 .animate-slide-up   { animation: slideUp    0.35s ease forwards; }
 .animate-card-reveal{ animation: cardReveal 0.55s cubic-bezier(0.34,1.56,0.64,1) both; }
+
+@layer components {
+  .profile-input {
+    width: 100%;
+    border: 1px solid #1a2f50;
+    background: rgba(10, 22, 40, 0.82);
+    color: #e2e8f0;
+    border-radius: 0.5rem;
+    padding: 0.75rem 0.875rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    outline: none;
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+  }
+
+  .profile-input::placeholder {
+    color: #475569;
+  }
+
+  .profile-input:focus {
+    border-color: rgba(6, 182, 212, 0.65);
+    box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.12), 0 0 16px rgba(6, 182, 212, 0.1);
+  }
+
+  .profile-input-compact {
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+  }
+}

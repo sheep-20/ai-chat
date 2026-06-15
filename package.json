@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev-server.mjs",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "rag:liaozhai": "python scripts/import-liaozhai-rag.py"
   },
   "dependencies": {
     "framer-motion": "^11.3.0",
