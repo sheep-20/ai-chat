@@ -271,6 +271,230 @@ function searchRagChunks({ worldId, query, limit }) {
     .map(item => item.chunk);
 }
 
+function legacyMemoryKey(item, scope) {
+  if (typeof item?.key === 'string' && item.key.trim()) return item.key.trim();
+  const source = typeof item?.source === 'string' ? item.source : 'chat';
+  const text = String(item?.text || '').replace(/\s+/g, '').toLowerCase().slice(0, 72);
+  return `${scope}.${source}.${text || Date.now()}`;
+}
+
+function nowMemoryItem(scope, text, source, tags = [], importance = 'medium', confidence = 0.72, key = '', title = '', updatedReason = '') {
+  const timestamp = Date.now();
+  const item = { key, text, source };
+  return {
+    id: `${scope}-${timestamp}-${Math.random().toString(16).slice(2)}`,
+    key: legacyMemoryKey(item, scope),
+    scope,
+    title: String(title || '').trim(),
+    text: String(text || '').trim(),
+    tags: tags.map(tag => String(tag)).filter(Boolean).slice(0, 6),
+    source,
+    importance,
+    confidence: clampNumber(confidence, 0, 1, 0.72),
+    updatedReason: String(updatedReason || '').trim(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function defaultUserMemory() {
+  return { items: [] };
+}
+
+function defaultWorldMemory(worldId) {
+  return { worldId, items: [], completedBondEventNotes: [], lastImportantMoment: '' };
+}
+
+function defaultShortTermMemory(worldId) {
+  return { worldId, summary: '', openLoops: [], lastUserNeed: '', updatedAt: 0 };
+}
+
+function normalizeMemoryItem(item, scope) {
+  if (!item || typeof item.text !== 'string' || !item.text.trim()) return null;
+  const timestamp = Date.now();
+  return {
+    id: typeof item.id === 'string' && item.id ? item.id : `${scope}-${timestamp}-${Math.random().toString(16).slice(2)}`,
+    key: legacyMemoryKey(item, scope),
+    scope,
+    title: typeof item.title === 'string' ? item.title.trim().slice(0, 40) : '',
+    text: item.text.trim().slice(0, 180),
+    tags: Array.isArray(item.tags) ? item.tags.map(tag => String(tag)).filter(Boolean).slice(0, 6) : [],
+    source: ['profile', 'chat', 'companion_log', 'bond_event', 'emotion', 'manual'].includes(item.source) ? item.source : 'chat',
+    importance: ['low', 'medium', 'high'].includes(item.importance) ? item.importance : 'medium',
+    confidence: clampNumber(item.confidence, 0, 1, 0.7),
+    updatedReason: typeof item.updatedReason === 'string' ? item.updatedReason.trim().slice(0, 120) : '',
+    createdAt: Number(item.createdAt) || timestamp,
+    updatedAt: Number(item.updatedAt) || timestamp,
+  };
+}
+
+function mergeMemoryItems(existing, incoming, scope, maxItems) {
+  const normalized = [
+    ...(Array.isArray(existing) ? existing : []),
+    ...(Array.isArray(incoming) ? incoming : []),
+  ]
+    .map(item => normalizeMemoryItem(item, scope))
+    .filter(Boolean);
+  const seen = new Map();
+  for (const item of normalized) {
+    const key = item.key || item.text.replace(/\s+/g, '').toLowerCase();
+    const previous = seen.get(key);
+    if (!previous || previous.confidence < item.confidence || previous.importance === 'low') {
+      seen.set(key, {
+        ...previous,
+        ...item,
+        createdAt: previous?.createdAt || item.createdAt,
+        updatedAt: Date.now(),
+      });
+    }
+  }
+  const rank = { high: 3, medium: 2, low: 1 };
+  return [...seen.values()]
+    .sort((a, b) => (rank[b.importance] - rank[a.importance]) || (b.updatedAt - a.updatedAt))
+    .slice(0, maxItems);
+}
+
+function normalizeUserMemory(memory) {
+  return { items: mergeMemoryItems([], memory?.items, 'user', 30) };
+}
+
+function normalizeWorldMemory(worldId, memory) {
+  const notes = Array.isArray(memory?.completedBondEventNotes)
+    ? memory.completedBondEventNotes
+        .filter(note => note && typeof note.eventId === 'string')
+        .map(note => ({
+          eventId: note.eventId,
+          title: String(note.title || ''),
+          choiceText: typeof note.choiceText === 'string' ? note.choiceText : '',
+          completedAt: Number(note.completedAt) || Date.now(),
+        }))
+        .slice(-20)
+    : [];
+  return {
+    worldId,
+    items: mergeMemoryItems([], memory?.items, 'world', 40),
+    completedBondEventNotes: notes,
+    lastImportantMoment: typeof memory?.lastImportantMoment === 'string' ? memory.lastImportantMoment.slice(0, 180) : '',
+  };
+}
+
+function normalizeShortTermMemory(worldId, memory) {
+  return {
+    worldId,
+    summary: typeof memory?.summary === 'string' ? memory.summary.slice(0, 240) : '',
+    openLoops: Array.isArray(memory?.openLoops) ? memory.openLoops.map(item => String(item)).filter(Boolean).slice(0, 6) : [],
+    lastUserNeed: typeof memory?.lastUserNeed === 'string' ? memory.lastUserNeed.slice(0, 160) : '',
+    updatedAt: Number(memory?.updatedAt) || Date.now(),
+  };
+}
+
+function heuristicMemoryExtraction(body) {
+  const worldId = String(body.worldId || 'unknown');
+  const userMessages = Array.isArray(body.messages) ? body.messages.filter(message => message.role === 'user') : [];
+  const recentUser = userMessages.slice(-3).map(message => String(message.content || '').trim()).filter(Boolean);
+  const topics = Array.isArray(body.topics) ? body.topics.map(topic => String(topic)).filter(Boolean) : [];
+  const unlockedTitles = Array.isArray(body.unlockedTitles) ? body.unlockedTitles.map(title => String(title)).filter(Boolean) : [];
+  const profile = body.profile || {};
+
+  const userItems = [];
+  if (profile.displayName) userItems.push(nowMemoryItem('user', `用户希望被称呼为“${profile.displayName}”。`, 'profile', ['称呼'], 'high', 0.95, 'profile.displayName', '称呼方式', '来自用户资料'));
+  if (profile.interactionStyle) userItems.push(nowMemoryItem('user', `用户偏好的互动方式：${profile.interactionStyle}`, 'profile', ['互动偏好'], 'high', 0.9, 'profile.interactionStyle', '互动方式', '来自用户资料'));
+  if (profile.emotionalSupport) userItems.push(nowMemoryItem('user', `用户低落时希望的陪伴方式：${profile.emotionalSupport}`, 'profile', ['情绪陪伴'], 'high', 0.9, 'profile.emotionalSupport', '陪伴偏好', '来自用户资料'));
+  if (profile.boundaries) userItems.push(nowMemoryItem('user', `用户明确的剧情边界与雷区：${profile.boundaries}`, 'profile', ['边界'], 'high', 0.92, 'profile.boundaries', '剧情边界', '来自用户资料'));
+  if (profile.preferredWorld) userItems.push(nowMemoryItem('user', `用户偏好的世界或题材：${profile.preferredWorld}`, 'profile', ['题材偏好'], 'medium', 0.86, 'profile.preference', '题材偏好', '来自用户资料'));
+  if (profile.memoryNotes) userItems.push(nowMemoryItem('user', `用户长期偏好备注：${profile.memoryNotes}`, 'profile', ['长期偏好'], 'medium', 0.82, 'profile.lifeFact', '长期备注', '来自用户资料'));
+
+  const worldItems = [];
+  if (unlockedTitles.length) {
+    worldItems.push(nowMemoryItem(
+      'world',
+      `本次新记录的图鉴线索：${unlockedTitles.slice(0, 4).join('、')}。`,
+      'companion_log',
+      ['图鉴'],
+      'medium',
+      0.74,
+      `world.${worldId}.topic.${unlockedTitles.slice(0, 2).join('-')}`,
+      '图鉴线索',
+      '来自本次图鉴解锁',
+    ));
+  }
+
+  return {
+    userItems,
+    worldItems,
+    shortTerm: {
+      worldId,
+      summary: recentUser.length ? `最近用户提到：${recentUser.join(' / ')}` : (topics.length ? `最近围绕 ${topics.join('、')} 展开。` : ''),
+      openLoops: topics.slice(0, 4),
+      lastUserNeed: recentUser[recentUser.length - 1] || '',
+      updatedAt: Date.now(),
+    },
+  };
+}
+
+async function extractMemoryWithModel(body) {
+  const fallback = heuristicMemoryExtraction(body);
+  const settings = getResolvedSettings();
+  if (!settings.apiKey) return fallback;
+
+  const recentMessages = Array.isArray(body.messages)
+    ? body.messages.slice(-24).map(message => `${message.role}: ${message.content}`).join('\n')
+    : '';
+  const prompt = [
+    '请从本次角色陪伴对话中提取结构化记忆，输出严格 JSON，不要 Markdown。',
+    '宁缺毋滥：普通闲聊不生成长期记忆，最多提取 2 条 userItems 和 2 条 worldItems。',
+    '只记录用户明确表达的稳定偏好、边界、称呼、陪伴方式，以及当前世界内真实发生的重要互动经历。',
+    '优先用稳定 key 更新旧记忆，而不是新增碎片。',
+    '不要写医疗诊断、人格标签、危机风险推断或用户没有明确表达的敏感信息。',
+    '用户 key 示例：profile.displayName, profile.interactionStyle, profile.emotionalSupport, profile.boundaries, profile.preference, profile.lifeFact。',
+    `世界 key 示例：world.${body.worldId}.bond.eventId, world.${body.worldId}.topic.topicName, world.${body.worldId}.importantMoment。`,
+    'JSON 结构：{"userItems":[{"key":"","title":"","text":"","tags":[],"importance":"low|medium|high","confidence":0.8,"updatedReason":""}],"worldItems":[{"key":"","title":"","text":"","tags":[],"importance":"low|medium|high","confidence":0.8,"updatedReason":""}],"shortTerm":{"summary":"","openLoops":[],"lastUserNeed":""}}',
+    `世界：${body.worldName || body.worldId}`,
+    `角色：${body.npcName || ''}`,
+    `用户资料：${JSON.stringify(body.profile || {})}`,
+    `陪伴日志：${body.companionSummary || ''}`,
+    `话题：${JSON.stringify(body.topics || [])}`,
+    `新图鉴：${JSON.stringify(body.unlockedTitles || [])}`,
+    '最近对话：',
+    recentMessages,
+  ].join('\n');
+
+  try {
+    const upstream = await fetch(`${settings.apiBase.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${settings.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: body.model || 'deepseek-chat',
+        stream: false,
+        temperature: 0.2,
+        max_tokens: 700,
+        messages: [
+          { role: 'system', content: '你是 TIME ECHO 的记忆整理器，只输出可解析 JSON。' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    });
+    if (!upstream.ok) return fallback;
+    const json = await upstream.json();
+    const content = json?.choices?.[0]?.message?.content || '';
+    const parsed = parseJsonObject(content);
+    return {
+      userItems: Array.isArray(parsed.userItems)
+        ? parsed.userItems.slice(0, 2).map(item => nowMemoryItem('user', item.text, 'chat', item.tags, item.importance, item.confidence, item.key, item.title, item.updatedReason))
+        : fallback.userItems,
+      worldItems: Array.isArray(parsed.worldItems)
+        ? parsed.worldItems.slice(0, 2).map(item => nowMemoryItem('world', item.text, 'chat', item.tags, item.importance, item.confidence, item.key, item.title, item.updatedReason))
+        : fallback.worldItems,
+      shortTerm: normalizeShortTermMemory(String(body.worldId || 'unknown'), parsed.shortTerm || fallback.shortTerm),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 async function analyzeEmotionWithModel(body) {
   const settings = getResolvedSettings();
   if (!settings.apiKey) return fallbackEmotion(body.text, 'heuristic');
@@ -417,6 +641,115 @@ async function handleApi(req, res) {
       }
     }
 
+    if (path === '/api/memory/user') {
+      const key = 'memory:user';
+      if (method === 'GET') {
+        sendJson(res, 200, { memory: normalizeUserMemory(getJson(key, defaultUserMemory())) });
+        return true;
+      }
+      if (method === 'PUT') {
+        const body = await readBody(req);
+        const memory = normalizeUserMemory(body.memory || defaultUserMemory());
+        setJson(key, memory);
+        sendJson(res, 200, { memory });
+        return true;
+      }
+    }
+
+    const worldMemoryId = routeParam(path, '/api/memory/world/');
+    if (worldMemoryId) {
+      const key = `memory:world:${worldMemoryId}`;
+      if (method === 'GET') {
+        sendJson(res, 200, { memory: normalizeWorldMemory(worldMemoryId, getJson(key, defaultWorldMemory(worldMemoryId))) });
+        return true;
+      }
+      if (method === 'PUT') {
+        const body = await readBody(req);
+        const memory = normalizeWorldMemory(worldMemoryId, body.memory || defaultWorldMemory(worldMemoryId));
+        setJson(key, memory);
+        sendJson(res, 200, { memory });
+        return true;
+      }
+    }
+
+    const shortMemoryId = routeParam(path, '/api/memory/short-term/');
+    if (shortMemoryId) {
+      const key = `memory:short:${shortMemoryId}`;
+      if (method === 'GET') {
+        sendJson(res, 200, { memory: normalizeShortTermMemory(shortMemoryId, getJson(key, defaultShortTermMemory(shortMemoryId))) });
+        return true;
+      }
+      if (method === 'PUT') {
+        const body = await readBody(req);
+        const memory = normalizeShortTermMemory(shortMemoryId, body.memory || defaultShortTermMemory(shortMemoryId));
+        setJson(key, memory);
+        sendJson(res, 200, { memory });
+        return true;
+      }
+    }
+
+    if (path === '/api/memory/extract' && method === 'POST') {
+      const body = await readBody(req);
+      const worldId = String(body.worldId || 'unknown');
+      const extracted = await extractMemoryWithModel(body);
+      const userKey = 'memory:user';
+      const worldKey = `memory:world:${worldId}`;
+      const shortKey = `memory:short:${worldId}`;
+      const userMemory = normalizeUserMemory({
+        items: mergeMemoryItems(getJson(userKey, defaultUserMemory()).items, extracted.userItems, 'user', 30),
+      });
+      const previousWorld = normalizeWorldMemory(worldId, getJson(worldKey, defaultWorldMemory(worldId)));
+      const worldMemory = normalizeWorldMemory(worldId, {
+        ...previousWorld,
+        items: mergeMemoryItems(previousWorld.items, extracted.worldItems, 'world', 40),
+        lastImportantMoment: extracted.worldItems?.[0]?.text || previousWorld.lastImportantMoment,
+      });
+      const shortTermMemory = normalizeShortTermMemory(worldId, extracted.shortTerm);
+      setJson(userKey, userMemory);
+      setJson(worldKey, worldMemory);
+      setJson(shortKey, shortTermMemory);
+      sendJson(res, 200, { userMemory, worldMemory, shortTermMemory });
+      return true;
+    }
+
+    const bondMemoryId = routeParam(path, '/api/memory/bond-event/');
+    if (bondMemoryId && method === 'POST') {
+      const body = await readBody(req);
+      const event = body.event || {};
+      const key = `memory:world:${bondMemoryId}`;
+      const previous = normalizeWorldMemory(bondMemoryId, getJson(key, defaultWorldMemory(bondMemoryId)));
+      const title = String(event.title || '羁绊事件');
+      const choiceText = typeof body.choiceText === 'string' ? body.choiceText : '';
+      const note = {
+        eventId: String(event.id || `event-${Date.now()}`),
+        title,
+        choiceText,
+        completedAt: Date.now(),
+      };
+      const text = choiceText
+        ? `用户在羁绊事件“${title}”中选择回应：“${choiceText.slice(0, 80)}”。`
+        : `用户完成了羁绊事件“${title}”。`;
+      const memory = normalizeWorldMemory(bondMemoryId, {
+        ...previous,
+        items: mergeMemoryItems(previous.items, [nowMemoryItem(
+          'world',
+          text,
+          'bond_event',
+          ['羁绊事件', title],
+          'high',
+          0.92,
+          `world.${bondMemoryId}.bond.${note.eventId}`,
+          title,
+          '羁绊事件完成',
+        )], 'world', 40),
+        completedBondEventNotes: [...previous.completedBondEventNotes.filter(item => item.eventId !== note.eventId), note].slice(-20),
+        lastImportantMoment: text,
+      });
+      setJson(key, memory);
+      sendJson(res, 200, { memory });
+      return true;
+    }
+
     if (path === '/api/emotion/analyze' && method === 'POST') {
       const body = await readBody(req);
       const emotion = await analyzeEmotionWithModel(body);
@@ -500,6 +833,25 @@ async function handleApi(req, res) {
         const next = Math.max(0, Math.floor(body.value ?? (current + Number(body.delta ?? 0))));
         setJson(key, next);
         sendJson(res, 200, { familiarity: next });
+        return true;
+      }
+    }
+
+    const bondEventsWorld = routeParam(path, '/api/bond-events/');
+    if (bondEventsWorld) {
+      const key = `bondEvents:${bondEventsWorld}`;
+      if (method === 'GET') {
+        sendJson(res, 200, { completed: getJson(key, []) });
+        return true;
+      }
+      if (method === 'POST') {
+        const body = await readBody(req);
+        const current = getJson(key, []);
+        const next = typeof body.eventId === 'string' && !current.includes(body.eventId)
+          ? [...current, body.eventId]
+          : current;
+        setJson(key, next);
+        sendJson(res, 200, { completed: next });
         return true;
       }
     }

@@ -1,4 +1,15 @@
-import type { CompanionLog, EmotionState, Message, RagChunk, UserProfile } from '../types';
+import type {
+  BondEvent,
+  CompanionLog,
+  EmotionState,
+  MemoryExtractResult,
+  Message,
+  RagChunk,
+  ShortTermMemory,
+  UserLongTermMemory,
+  UserProfile,
+  WorldBondMemory,
+} from '../types';
 
 const DEFAULT_API_BASE = 'https://api.deepseek.com/v1';
 
@@ -157,6 +168,90 @@ export const storage = {
       body: JSON.stringify({ emotion }),
     });
     return data.emotions ?? [];
+  },
+
+  async getUserMemory(): Promise<UserLongTermMemory> {
+    const data = await fetchJson<{ memory: UserLongTermMemory }>('/api/memory/user');
+    return data.memory ?? { items: [] };
+  },
+
+  async saveUserMemory(memory: UserLongTermMemory): Promise<UserLongTermMemory> {
+    const data = await fetchJson<{ memory: UserLongTermMemory }>('/api/memory/user', {
+      method: 'PUT',
+      body: JSON.stringify({ memory }),
+    });
+    return data.memory ?? { items: [] };
+  },
+
+  async getWorldMemory(worldId: string): Promise<WorldBondMemory> {
+    const data = await fetchJson<{ memory: WorldBondMemory }>(`/api/memory/world/${encodeURIComponent(worldId)}`);
+    return data.memory ?? { worldId, items: [], completedBondEventNotes: [], lastImportantMoment: '' };
+  },
+
+  async saveWorldMemory(worldId: string, memory: WorldBondMemory): Promise<WorldBondMemory> {
+    const data = await fetchJson<{ memory: WorldBondMemory }>(`/api/memory/world/${encodeURIComponent(worldId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ memory }),
+    });
+    return data.memory ?? { worldId, items: [], completedBondEventNotes: [], lastImportantMoment: '' };
+  },
+
+  async getShortTermMemory(worldId: string): Promise<ShortTermMemory> {
+    const data = await fetchJson<{ memory: ShortTermMemory }>(`/api/memory/short-term/${encodeURIComponent(worldId)}`);
+    return data.memory ?? { worldId, summary: '', openLoops: [], lastUserNeed: '', updatedAt: 0 };
+  },
+
+  async saveShortTermMemory(worldId: string, memory: ShortTermMemory): Promise<ShortTermMemory> {
+    const data = await fetchJson<{ memory: ShortTermMemory }>(`/api/memory/short-term/${encodeURIComponent(worldId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ memory }),
+    });
+    return data.memory ?? { worldId, summary: '', openLoops: [], lastUserNeed: '', updatedAt: Date.now() };
+  },
+
+  async extractMemory(input: {
+    worldId: string;
+    worldName: string;
+    npcName: string;
+    profile: UserProfile | null;
+    messages: Message[];
+    topics: string[];
+    companionSummary: string;
+    emotionHistory: EmotionState[];
+    unlockedTitles: string[];
+    familiarityGain: number;
+    familiarityAfter: number;
+  }): Promise<MemoryExtractResult> {
+    return fetchJson<MemoryExtractResult>('/api/memory/extract', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  async recordBondEventMemory(input: {
+    worldId: string;
+    event: BondEvent;
+    choiceText?: string;
+    familiarity: number;
+  }): Promise<WorldBondMemory> {
+    const data = await fetchJson<{ memory: WorldBondMemory }>(`/api/memory/bond-event/${encodeURIComponent(input.worldId)}`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    return data.memory ?? { worldId: input.worldId, items: [], completedBondEventNotes: [], lastImportantMoment: '' };
+  },
+
+  async getCompletedBondEvents(worldId: string): Promise<string[]> {
+    const data = await fetchJson<{ completed: string[] }>(`/api/bond-events/${encodeURIComponent(worldId)}`);
+    return data.completed ?? [];
+  },
+
+  async completeBondEvent(worldId: string, eventId: string): Promise<string[]> {
+    const data = await fetchJson<{ completed: string[] }>(`/api/bond-events/${encodeURIComponent(worldId)}`, {
+      method: 'POST',
+      body: JSON.stringify({ eventId }),
+    });
+    return data.completed ?? [];
   },
 
   async searchRag(worldId: string, query: string, limit = 5): Promise<RagChunk[]> {

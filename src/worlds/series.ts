@@ -26,7 +26,7 @@ export const WORLD_SERIES: WorldSeries[] = [
     id: 'imagined_lives',
     name: '异想生灵',
     description: '尝试聆听非人类生命如何感知世界。',
-    themeColor: '#38bdf8',
+    themeColor: '#10b981',
     order: 4,
   },
 ];

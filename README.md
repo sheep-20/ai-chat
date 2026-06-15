@@ -8,6 +8,7 @@ Time Echo（时间回声）是一个本地运行的 AI 角色陪伴聊天应用�
 - 首次引导流程：API 设置 → 艾希世界观载入 → 用户资料 → 世界选择。
 - 用户资料：可编辑称呼、性格、偏好世界、互动方式、剧情边界和长期偏好。
 - 情绪识别：用户发送消息后会识别当前心情，并把情绪支持策略注入角色回复。
+- 记忆分层：短期对话、长期用户偏好和世界羁绊经历会分层沉淀，让角色后续能自然接上关系。
 - 本地 SQLite 存储：数据写入 `data/time-echo.sqlite`，不再保存到浏览器 `localStorage`。
 - 陪伴日志：退出对话时调用大模型生成本次对话总结；失败时使用本地兜底总结。
 - 同源 API：浏览器只请求本地 `/api/*` 和 `/api-proxy/*`，API Key 由本地后端读取。
@@ -136,9 +137,18 @@ npm run preview
 - `POST /api/companion-logs/:worldId/generate-summary`
 - `POST /api/emotion/analyze`
 - `GET/POST /api/emotion/:worldId`
+- `GET/PUT /api/memory/user`
+- `GET/PUT /api/memory/world/:worldId`
+- `GET/PUT /api/memory/short-term/:worldId`
+- `POST /api/memory/extract`
+- `POST /api/memory/bond-event/:worldId`
 - `POST /api-proxy/chat/completions`
 
 前端不直接访问上游模型 API，也不在浏览器保存 API Key。
+
+## 记忆分层
+
+应用会把陪伴上下文分为三层并写入本地 SQLite：短期对话记忆、长期用户偏好、世界专属羁绊记忆。ChatPage 在生成回复前读取这些记忆并注入 system prompt，让角色自然延续用户偏好和世界经历；退出对话后会从陪伴日志、情绪轨迹、图鉴解锁和熟悉度变化中抽取记忆；完成羁绊事件后会立即写入对应世界的羁绊记忆。
 
 ## 情绪识别与个性化陪伴
 

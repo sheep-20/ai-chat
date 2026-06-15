@@ -60,6 +60,57 @@ export interface EmotionState {
   source?: 'ai' | 'heuristic' | 'fallback';
 }
 
+export type MemoryScope = 'user' | 'world' | 'short';
+export type MemoryImportance = 'low' | 'medium' | 'high';
+export type MemorySource = 'profile' | 'chat' | 'companion_log' | 'bond_event' | 'emotion' | 'manual';
+
+export interface MemoryItem {
+  id: string;
+  key: string;
+  scope: MemoryScope;
+  title?: string;
+  text: string;
+  tags: string[];
+  source: MemorySource;
+  importance: MemoryImportance;
+  confidence: number;
+  updatedReason?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface UserLongTermMemory {
+  items: MemoryItem[];
+}
+
+export interface BondEventMemoryNote {
+  eventId: string;
+  title: string;
+  choiceText?: string;
+  completedAt: number;
+}
+
+export interface WorldBondMemory {
+  worldId: string;
+  items: MemoryItem[];
+  completedBondEventNotes: BondEventMemoryNote[];
+  lastImportantMoment: string;
+}
+
+export interface ShortTermMemory {
+  worldId: string;
+  summary: string;
+  openLoops: string[];
+  lastUserNeed: string;
+  updatedAt: number;
+}
+
+export interface MemoryExtractResult {
+  userMemory: UserLongTermMemory;
+  worldMemory: WorldBondMemory;
+  shortTermMemory: ShortTermMemory;
+}
+
 export type CardRarity = 'common' | 'rare' | 'legendary';
 
 export interface KnowledgeCard {
@@ -70,6 +121,21 @@ export interface KnowledgeCard {
   content: string;
   rarity: CardRarity;
   icon: string;
+}
+
+export interface BondChoice {
+  label: string;
+  userText: string;
+}
+
+export interface BondEvent {
+  id: string;
+  title: string;
+  threshold: number;
+  summary: string;
+  triggerLabel: string;
+  opening: string;
+  choices: BondChoice[];
 }
 
 export interface WorldConfig {
@@ -89,6 +155,7 @@ export interface WorldConfig {
   systemPrompt: string;
   initialGreeting: string;
   knowledgeCards: KnowledgeCard[];
+  bondEvents?: BondEvent[];
   available: boolean;
   comingSoon?: string;
   statusLabel?: string;

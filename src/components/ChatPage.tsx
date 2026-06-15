@@ -1,16 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, ArrowLeft, BookOpen, HeartPulse, Send, Settings, Sparkles, UserRound } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BookOpen, Brain, HeartPulse, Link2, Send, Settings, Sparkles, Trash2, UserRound } from 'lucide-react';
 import { getWorld } from '../worlds';
 import { WORLD_SERIES } from '../worlds/series';
 import { storage } from '../utils/storage';
 import { streamChat } from '../utils/ai';
 import { parseUnlocks, cleanForDisplay } from '../utils/unlock';
-import { buildCompanionSummary, calculateFamiliarityGain, extractCompanionTopics, getFamiliarityLabel } from '../utils/companionship';
+import { buildCompanionSummary, calculateExchangeFamiliarityGain, extractCompanionTopics, getFamiliarityLabel } from '../utils/companionship';
 import { ChatBubble } from './ChatBubble';
 import { EncyclopediaPanel } from './EncyclopediaPanel';
+import { MemoryArchiveModal } from './MemoryArchiveModal';
 import { UnlockToast } from './UnlockToast';
-import type { EmotionState, KnowledgeCard, Message, UserProfile, WorldConfig } from '../types';
+import type {
+  BondEvent,
+  EmotionState,
+  KnowledgeCard,
+  Message,
+  ShortTermMemory,
+  UserLongTermMemory,
+  UserProfile,
+  WorldBondMemory,
+  WorldConfig,
+} from '../types';
 
 interface Props {
   worldId: string;
@@ -73,7 +84,7 @@ function getChatTheme(world: WorldConfig) {
     return {
       ...base,
       panel: 'rgba(5,17,31,0.88)',
-      motif: 'radial-gradient(ellipse at 50% 20%, rgba(56,189,248,0.12), transparent 35%), repeating-linear-gradient(0deg, rgba(56,189,248,0.035) 0 1px, transparent 1px 18px)',
+      motif: 'radial-gradient(ellipse at 50% 20%, rgba(16,185,129,0.12), transparent 35%), repeating-linear-gradient(0deg, rgba(16,185,129,0.035) 0 1px, transparent 1px 18px)',
       motifSize: 'auto, 100% 36px',
     };
   }
@@ -96,13 +107,25 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
   const [familiarity, setFamiliarity] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [emotionHistory, setEmotionHistory] = useState<EmotionState[]>([]);
+  const [userMemory, setUserMemory] = useState<UserLongTermMemory>({ items: [] });
+  const [worldMemory, setWorldMemory] = useState<WorldBondMemory>({ worldId, items: [], completedBondEventNotes: [], lastImportantMoment: '' });
+  const [shortTermMemory, setShortTermMemory] = useState<ShortTermMemory>({ worldId, summary: '', openLoops: [], lastUserNeed: '', updatedAt: 0 });
+  const [completedBondIds, setCompletedBondIds] = useState<Set<string>>(new Set());
+  const [activeBondEvent, setActiveBondEvent] = useState<BondEvent | null>(null);
   const [newUnlock, setNewUnlock] = useState<KnowledgeCard | null>(null);
+  const [familiarityToast, setFamiliarityToast] = useState<{ delta: number; reasons: string[] } | null>(null);
   const [showEncyclopedia, setShowEncyclopedia] = useState(false);
+  const [showMemoryArchive, setShowMemoryArchive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const familiarityToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionStartRef = useRef(Date.now());
   const sessionUnlockedRef = useRef(new Set<string>());
+  const sessionFamiliarityGainRef = useRef(0);
+  const pendingBondCompletionRef = useRef(false);
+  const pendingBondEventRef = useRef<BondEvent | null>(null);
+  const pendingBondChoiceRef = useRef('');
   const sessionFinalizedRef = useRef(false);
   const loadedRef = useRef(false);
   const apiAvailableRef = useRef(true);
@@ -111,6 +134,10 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
     ? emotionHistory[emotionHistory.length - 1]
     : undefined;
   const unlockedCount = unlockedIds.size;
+  const bondEvents = world.bondEvents ?? [];
+  const completedBondCount = bondEvents.filter(event => completedBondIds.has(event.id)).length;
+  const nextBondEvent = bondEvents.find(event => !completedBondIds.has(event.id));
+  const availableBondEvent = bondEvents.find(event => familiarity >= event.threshold && !completedBondIds.has(event.id));
 
   useEffect(() => {
     let alive = true;
@@ -129,6 +156,10 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
         storage.getFamiliarity(worldId),
         storage.getProfileState(),
         storage.getEmotionHistory(worldId),
+        storage.getCompletedBondEvents(worldId),
+        storage.getUserMemory(),
+        storage.getWorldMemory(worldId),
+        storage.getShortTermMemory(worldId),
       ]);
       if (!alive) return;
 
@@ -148,12 +179,21 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
       const savedFamiliarity = results[2].status === 'fulfilled' ? results[2].value : 0;
       const profileState = results[3].status === 'fulfilled' ? results[3].value : { profile: null };
       const savedEmotions = results[4].status === 'fulfilled' ? results[4].value : [];
+      const savedBondEvents = results[5].status === 'fulfilled' ? results[5].value : [];
+      const savedUserMemory = results[6].status === 'fulfilled' ? results[6].value : { items: [] };
+      const savedWorldMemory = results[7].status === 'fulfilled' ? results[7].value : { worldId, items: [], completedBondEventNotes: [], lastImportantMoment: '' };
+      const savedShortMemory = results[8].status === 'fulfilled' ? results[8].value : { worldId, summary: '', openLoops: [], lastUserNeed: '', updatedAt: 0 };
 
       setMessages(savedMessages.length > 0 ? savedMessages : [initialMessage]);
       setUnlockedIds(new Set(savedUnlocked));
       setFamiliarity(savedFamiliarity);
       setProfile(profileState.profile);
       setEmotionHistory(savedEmotions);
+      setUserMemory(savedUserMemory);
+      setWorldMemory(savedWorldMemory);
+      setShortTermMemory(savedShortMemory);
+      setCompletedBondIds(new Set(savedBondEvents));
+      setActiveBondEvent(null);
       loadedRef.current = true;
       setIsLoading(false);
     }
@@ -175,6 +215,13 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
   }, [messages]);
 
   useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (familiarityToastTimerRef.current) clearTimeout(familiarityToastTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!loadedRef.current || !apiAvailableRef.current) return;
     void storage.saveMessages(worldId, messages).catch(() => {});
   }, [messages, worldId]);
@@ -192,6 +239,32 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
     setNewUnlock(card);
     toastTimerRef.current = setTimeout(() => setNewUnlock(null), 4000);
   }, [unlockedIds, worldId]);
+
+  const showFamiliarityToast = useCallback((delta: number, reasons: string[]) => {
+    if (familiarityToastTimerRef.current) clearTimeout(familiarityToastTimerRef.current);
+    setFamiliarityToast({ delta, reasons });
+    familiarityToastTimerRef.current = setTimeout(() => setFamiliarityToast(null), 2600);
+  }, []);
+
+  function buildMemoryPrompt() {
+    const userItems = userMemory.items.slice(0, 8);
+    const worldItems = worldMemory.items.slice(0, 8);
+    const shortLines = [
+      shortTermMemory.summary ? `- 最近对话摘要：${shortTermMemory.summary}` : '',
+      shortTermMemory.lastUserNeed ? `- 用户刚表达的需求：${shortTermMemory.lastUserNeed}` : '',
+      shortTermMemory.openLoops.length ? `- 未完成话题：${shortTermMemory.openLoops.join('、')}` : '',
+    ].filter(Boolean);
+
+    if (!userItems.length && !worldItems.length && !shortLines.length) return '';
+
+    return [
+      '【记忆上下文】',
+      '这些内容只用于让角色更自然地延续关系，不要直接说明“我读取了记忆”。如果与用户当前表达冲突，以当前表达为准。',
+      userItems.length ? ['长期用户偏好：', ...userItems.map(item => `- ${item.text}`)].join('\n') : '',
+      worldItems.length ? [`${world.name} 的羁绊记忆：`, ...worldItems.map(item => `- ${item.text}`)].join('\n') : '',
+      shortLines.length ? ['本轮短期上下文：', ...shortLines].join('\n') : '',
+    ].filter(Boolean).join('\n\n');
+  }
 
   function buildPersonalizationPrompt(emotion: EmotionState | null) {
     const profileLines = profile ? [
@@ -293,13 +366,9 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
     const durationMs = Date.now() - sessionStartRef.current;
     const unlockedCards = world.knowledgeCards.filter(card => unlockedIds.has(card.id));
     const topics = extractCompanionTopics({ messages, unlockedCards });
-    const userMessageCount = messages.filter(message => message.role === 'user').length;
     const unlockCount = sessionUnlockedRef.current.size;
-    const familiarityGain = calculateFamiliarityGain({ durationMs, userMessageCount, unlockCount });
-    const familiarityAfter = apiAvailableRef.current
-      ? await storage.addFamiliarity(worldId, familiarityGain)
-      : familiarity + familiarityGain;
-    setFamiliarity(familiarityAfter);
+    const familiarityGain = sessionFamiliarityGainRef.current;
+    const familiarityAfter = familiarity;
 
     const summaryResult = await generateJournalSummary({ topics, durationMs, familiarityGain, familiarityAfter, unlockCount });
 
@@ -319,8 +388,28 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
         familiarityAfter,
         unlockCount,
       });
+      try {
+        const result = await storage.extractMemory({
+          worldId,
+          worldName: world.name,
+          npcName: world.npcName,
+          profile,
+          messages,
+          topics,
+          companionSummary: summaryResult.summary,
+          emotionHistory,
+          unlockedTitles: unlockedCards.map(card => card.title),
+          familiarityGain,
+          familiarityAfter,
+        });
+        setUserMemory(result.userMemory);
+        setWorldMemory(result.worldMemory);
+        setShortTermMemory(result.shortTermMemory);
+      } catch {
+        // Memory extraction is helpful context, but leaving the chat must not fail because of it.
+      }
     }
-  }, [emotionHistory, familiarity, messages, unlockedIds, world, worldId]);
+  }, [emotionHistory, familiarity, messages, profile, unlockedIds, world, worldId]);
 
   async function handleBack() {
     if (isLeaving) return;
@@ -330,8 +419,76 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
     onBack();
   }
 
-  async function sendMessage() {
-    const text = input.trim();
+  function startBondEvent(event: BondEvent) {
+    if (activeBondEvent || isStreaming || isLeaving) return;
+    const eventMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: event.opening,
+      timestamp: Date.now(),
+    };
+    setMessages(prev => [...prev, eventMessage]);
+    setActiveBondEvent(event);
+  }
+
+  async function completeBondEvent(event: BondEvent) {
+    if (completedBondIds.has(event.id)) return;
+    if (apiAvailableRef.current) {
+      try {
+        const next = await storage.completeBondEvent(worldId, event.id);
+        setCompletedBondIds(new Set(next));
+        const memory = await storage.recordBondEventMemory({
+          worldId,
+          event,
+          choiceText: pendingBondChoiceRef.current,
+          familiarity,
+        });
+        setWorldMemory(memory);
+        return;
+      } catch {
+        // Fall through to local state when the local API is unavailable.
+      }
+    }
+    setCompletedBondIds(prev => new Set([...prev, event.id]));
+  }
+
+  async function handleBondChoice(choiceText: string) {
+    const event = activeBondEvent;
+    if (!event || isStreaming || isLeaving) return;
+    setActiveBondEvent(null);
+    pendingBondCompletionRef.current = true;
+    pendingBondEventRef.current = event;
+    pendingBondChoiceRef.current = choiceText;
+    await sendMessage(choiceText);
+  }
+
+  async function deleteMemoryItem(scope: 'user' | 'world', itemId: string) {
+    if (scope === 'user') {
+      const next = { items: userMemory.items.filter(item => item.id !== itemId) };
+      setUserMemory(next);
+      if (apiAvailableRef.current) {
+        await storage.saveUserMemory(next).catch(() => {});
+      }
+      return;
+    }
+
+    const next = { ...worldMemory, items: worldMemory.items.filter(item => item.id !== itemId) };
+    setWorldMemory(next);
+    if (apiAvailableRef.current) {
+      await storage.saveWorldMemory(worldId, next).catch(() => {});
+    }
+  }
+
+  async function clearShortTermMemory() {
+    const next: ShortTermMemory = { worldId, summary: '', openLoops: [], lastUserNeed: '', updatedAt: Date.now() };
+    setShortTermMemory(next);
+    if (apiAvailableRef.current) {
+      await storage.saveShortTermMemory(worldId, next).catch(() => {});
+    }
+  }
+
+  async function sendMessage(overrideText?: string) {
+    const text = (overrideText ?? input).trim();
     if (!text || isStreaming || isLeaving) return;
 
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, timestamp: Date.now() };
@@ -340,9 +497,21 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
     const nextMessages = [...messages, userMsg];
 
     setMessages([...nextMessages, assistantMsg]);
-    setInput('');
+    if (!overrideText) setInput('');
     setIsStreaming(true);
     setStreamingId(assistantId);
+
+    const nextShortTermMemory: ShortTermMemory = {
+      worldId,
+      summary: shortTermMemory.summary || `最近用户开始和${world.npcName}对话。`,
+      openLoops: Array.from(new Set([text.slice(0, 36), ...shortTermMemory.openLoops])).filter(Boolean).slice(0, 6),
+      lastUserNeed: text.slice(0, 160),
+      updatedAt: Date.now(),
+    };
+    setShortTermMemory(nextShortTermMemory);
+    if (apiAvailableRef.current) {
+      void storage.saveShortTermMemory(worldId, nextShortTermMemory).catch(() => {});
+    }
 
     let currentEmotion: EmotionState | null = null;
     if (apiAvailableRef.current) {
@@ -355,6 +524,7 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
       }
     }
 
+    const memoryPrompt = buildMemoryPrompt();
     const supportPrompt = buildPersonalizationPrompt(currentEmotion);
     let ragPrompt = '';
     if (worldId === 'world2' && apiAvailableRef.current) {
@@ -365,7 +535,7 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
         ragPrompt = '';
       }
     }
-    const systemPrompt = [world.systemPrompt, ragPrompt, supportPrompt].filter(Boolean).join('\n\n');
+    const systemPrompt = [world.systemPrompt, ragPrompt, memoryPrompt, supportPrompt].filter(Boolean).join('\n\n');
     const apiMessages = [
       { role: 'system', content: systemPrompt },
       ...nextMessages.slice(-30).map(m => ({ role: m.role, content: m.content })),
@@ -381,14 +551,49 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
       async onDone(rawText) {
         const { cleaned, keys } = parseUnlocks(rawText);
         setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: cleaned } : m));
+        const newlyUnlockedCards: KnowledgeCard[] = [];
         for (const key of keys) {
           const card = world.knowledgeCards.find(c => c.unlockKey === key);
-          if (card) await triggerUnlock(card);
+          if (card && !unlockedIds.has(card.id)) {
+            newlyUnlockedCards.push(card);
+            await triggerUnlock(card);
+          }
+        }
+        if (pendingBondEventRef.current) {
+          await completeBondEvent(pendingBondEventRef.current);
+        }
+
+        const gain = calculateExchangeFamiliarityGain({
+          text,
+          recentUserMessages: messages.filter(message => message.role === 'user').slice(-3),
+          newlyUnlockedCards,
+          bondCompleted: pendingBondCompletionRef.current,
+        });
+        pendingBondCompletionRef.current = false;
+        pendingBondEventRef.current = null;
+        pendingBondChoiceRef.current = '';
+
+        if (gain.delta > 0) {
+          sessionFamiliarityGainRef.current += gain.delta;
+          if (apiAvailableRef.current) {
+            try {
+              const nextFamiliarity = await storage.addFamiliarity(worldId, gain.delta);
+              setFamiliarity(nextFamiliarity);
+            } catch {
+              setFamiliarity(prev => prev + gain.delta);
+            }
+          } else {
+            setFamiliarity(prev => prev + gain.delta);
+          }
+          showFamiliarityToast(gain.delta, gain.reasons);
         }
         setIsStreaming(false);
         setStreamingId(null);
       },
       onError(err) {
+        pendingBondCompletionRef.current = false;
+        pendingBondEventRef.current = null;
+        pendingBondChoiceRef.current = '';
         setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `请求失败：${err.message}` } : m));
         setIsStreaming(false);
         setStreamingId(null);
@@ -484,6 +689,7 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
           <div className="mt-4 grid gap-3">
             <Metric label="熟悉度" value={`${getFamiliarityLabel(familiarity)} · ${familiarity}`} world={world} />
             <Metric label="图鉴进度" value={`${unlockedCount}/${world.knowledgeCards.length}`} world={world} />
+            <Metric label="羁绊事件" value={`${completedBondCount}/${bondEvents.length}`} world={world} />
             <Metric label="情绪轨迹" value={latestEmotion ? MOOD_LABEL[latestEmotion.mood] : '未同步'} world={world} />
           </div>
         </aside>
@@ -526,6 +732,27 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
           </div>
 
           <div className="border-t px-4 py-4" style={{ borderColor: theme.line, background: 'rgba(6,13,26,0.82)', backdropFilter: 'blur(18px)' }}>
+            {activeBondEvent && (
+              <div className="mx-auto mb-3 max-w-4xl rounded-xl border px-4 py-3" style={{ borderColor: world.primaryColor + '35', background: world.primaryColor + '0c' }}>
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold" style={{ color: world.primaryColor }}>
+                  <Link2 size={14} />
+                  羁绊事件 · {activeBondEvent.title}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {activeBondEvent.choices.map(choice => (
+                    <button
+                      key={choice.label}
+                      onClick={() => void handleBondChoice(choice.userText)}
+                      disabled={isStreaming || isLeaving}
+                      className="rounded-lg border px-3 py-2 text-left text-xs text-slate-200 transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-40"
+                      style={{ borderColor: world.primaryColor + '35', background: 'rgba(15,23,42,0.72)' }}
+                    >
+                      {choice.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="mx-auto grid max-w-4xl grid-cols-[minmax(0,1fr)_56px] items-stretch gap-3">
               <div className="relative min-h-[56px]">
                 <textarea
@@ -551,7 +778,7 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
               </div>
               <motion.button
                 whileTap={{ scale: 0.92 }}
-                onClick={sendMessage}
+                onClick={() => void sendMessage()}
                 disabled={!input.trim() || isStreaming || isLeaving || isLoading}
                 className="flex h-14 w-14 items-center justify-center rounded-xl border transition-all duration-200 disabled:opacity-30"
                 style={{
@@ -581,6 +808,113 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
                 : '还没有新的情绪轨迹。发送一句话后，角色会调整陪伴节奏。'}
             </p>
           </div>
+          <div className="mt-4 rounded-xl border p-4" style={{ borderColor: theme.line, background: theme.panel }}>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <Link2 size={16} style={{ color: world.primaryColor }} />
+              羁绊事件
+            </div>
+            {availableBondEvent ? (
+              <>
+                <div className="mt-3 text-sm font-semibold" style={{ color: world.primaryColor }}>
+                  {availableBondEvent.title}
+                </div>
+                <p className="mt-2 text-xs leading-6 text-slate-500">{availableBondEvent.summary}</p>
+                <button
+                  onClick={() => startBondEvent(availableBondEvent)}
+                  disabled={!!activeBondEvent || isStreaming || isLeaving}
+                  className="mt-3 w-full rounded-lg border px-3 py-2 text-left text-xs font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{ color: world.primaryColor, borderColor: world.primaryColor + '45', background: world.primaryColor + '10' }}
+                >
+                  {availableBondEvent.triggerLabel}
+                </button>
+              </>
+            ) : nextBondEvent ? (
+              <p className="mt-3 text-xs leading-6 text-slate-500">
+                下一段羁绊：{nextBondEvent.title} · 需要熟悉度 {nextBondEvent.threshold}
+              </p>
+            ) : (
+              <p className="mt-3 text-xs leading-6 text-slate-500">
+                已完成全部羁绊事件。这个角色已经把最重要的故事交给你了。
+              </p>
+            )}
+            <div className="mt-2 font-mono text-xs text-slate-600">{completedBondCount}/{bondEvents.length} 已完成</div>
+          </div>
+          <div className="mt-4 rounded-xl border p-4" style={{ borderColor: theme.line, background: theme.panel }}>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <Brain size={16} style={{ color: world.primaryColor }} />
+              记忆档案
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="rounded-lg border border-white/5 bg-white/[0.03] px-2 py-2">
+                <div className="font-mono text-[10px] text-slate-600">USER</div>
+                <div className="mt-1 text-sm font-semibold" style={{ color: world.primaryColor }}>{userMemory.items.length}</div>
+              </div>
+              <div className="rounded-lg border border-white/5 bg-white/[0.03] px-2 py-2">
+                <div className="font-mono text-[10px] text-slate-600">BOND</div>
+                <div className="mt-1 text-sm font-semibold" style={{ color: world.primaryColor }}>{worldMemory.items.length}</div>
+              </div>
+              <div className="rounded-lg border border-white/5 bg-white/[0.03] px-2 py-2">
+                <div className="font-mono text-[10px] text-slate-600">SHORT</div>
+                <div className="mt-1 text-sm font-semibold" style={{ color: world.primaryColor }}>{shortTermMemory.summary || shortTermMemory.openLoops.length ? 1 : 0}</div>
+              </div>
+            </div>
+            <div className="mt-3 truncate text-xs text-slate-500">
+              {shortTermMemory.lastUserNeed || shortTermMemory.summary || worldMemory.lastImportantMoment || '还没有沉淀新的记忆。'}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowMemoryArchive(true)}
+              className="mt-3 w-full rounded-lg border px-3 py-2 text-left text-xs font-semibold transition-all hover:scale-[1.01]"
+              style={{ color: world.primaryColor, borderColor: world.primaryColor + '45', background: world.primaryColor + '10' }}
+            >
+              查看 / 管理
+            </button>
+            {userMemory.items.length > 0 || worldMemory.items.length > 0 || shortTermMemory.summary ? (
+              <div className="mt-3 hidden space-y-2">
+                {userMemory.items.slice(0, 2).map(item => (
+                  <div key={item.id} className="flex gap-2 rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 font-mono text-[10px]" style={{ color: world.primaryColor }}>USER</div>
+                      {item.text}
+                    </div>
+                    <button
+                      type="button"
+                      title="删除这条记忆"
+                      onClick={() => void deleteMemoryItem('user', item.id)}
+                      className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-white/5 hover:text-slate-300"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+                {worldMemory.items.slice(0, 2).map(item => (
+                  <div key={item.id} className="flex gap-2 rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 font-mono text-[10px]" style={{ color: world.primaryColor }}>BOND</div>
+                      {item.text}
+                    </div>
+                    <button
+                      type="button"
+                      title="删除这条记忆"
+                      onClick={() => void deleteMemoryItem('world', item.id)}
+                      className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-white/5 hover:text-slate-300"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+                {shortTermMemory.summary && (
+                  <div className="rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-500">
+                    {shortTermMemory.summary}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="mt-3 text-xs leading-6 text-slate-500">
+                还没有沉淀新的记忆。完成一次对话或羁绊事件后，这里会记录角色应当记住的片段。
+              </p>
+            )}
+          </div>
           <button
             onClick={() => setShowEncyclopedia(true)}
             className="mt-4 w-full rounded-xl border px-4 py-3 text-left text-sm transition-all hover:scale-[1.01]"
@@ -601,6 +935,43 @@ export function ChatPage({ worldId, onBack, onOpenSettings, onOpenProfile }: Pro
 
       {showEncyclopedia && (
         <div className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm" onClick={() => setShowEncyclopedia(false)} />
+      )}
+
+      {showMemoryArchive && (
+        <MemoryArchiveModal
+          world={world}
+          userMemory={userMemory}
+          worldMemory={worldMemory}
+          shortTermMemory={shortTermMemory}
+          onClose={() => setShowMemoryArchive(false)}
+          onDeleteUserMemory={itemId => void deleteMemoryItem('user', itemId)}
+          onDeleteWorldMemory={itemId => void deleteMemoryItem('world', itemId)}
+          onClearShortTermMemory={() => void clearShortTermMemory()}
+        />
+      )}
+
+      {familiarityToast && (
+        <motion.div
+          initial={{ opacity: 0, y: -10, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -8, scale: 0.98 }}
+          className="fixed right-6 top-24 z-40 w-[240px] rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-xl"
+          style={{
+            borderColor: world.primaryColor + '55',
+            background: 'rgba(6,13,26,0.92)',
+            boxShadow: `0 0 24px ${world.glowColor}`,
+          }}
+        >
+          <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: world.primaryColor }}>
+            <HeartPulse size={16} />
+            熟悉度 +{familiarityToast.delta}
+          </div>
+          {familiarityToast.reasons.length > 0 && (
+            <div className="mt-1 truncate text-xs text-slate-500">
+              {familiarityToast.reasons.slice(0, 2).join(' · ')}
+            </div>
+          )}
+        </motion.div>
       )}
 
       <UnlockToast card={newUnlock} world={world} />

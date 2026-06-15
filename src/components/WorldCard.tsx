@@ -117,6 +117,16 @@ export function WorldCard({ world, unlockedCount, familiarity, onClick }: Props)
                 {getFamiliarityLabel(familiarity)} · {familiarity}
               </span>
             </div>
+            <div className="h-1 overflow-hidden rounded-full bg-space-700">
+              <div
+                className="h-full rounded-full transition-all duration-700"
+                style={{
+                  width: `${Math.max(0, Math.min(100, familiarity))}%`,
+                  background: `linear-gradient(90deg, ${world.primaryColor}66, ${world.primaryColor})`,
+                  boxShadow: `0 0 8px ${world.primaryColor}`,
+                }}
+              />
+            </div>
           </div>
         )}
 
