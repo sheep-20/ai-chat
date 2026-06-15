@@ -42,6 +42,8 @@ const systemPrompt = `你是艾希（Ái Xī），一个来自2847年的量子�
 
 export const world1: WorldConfig = {
   id: 'world1',
+  seriesId: 'future_echoes',
+  order: 1,
   name: '量子废墟',
   era: '2847年',
   tagline: '在时间的裂缝里，有人一直在等。',
@@ -49,6 +51,7 @@ export const world1: WorldConfig = {
   npcName: '艾希',
   npcTitle: '量子残魂 · 档案库守护者',
   npcAvatar: '◈',
+  npcIcon: '◇',
   primaryColor: '#06b6d4',
   glowColor: 'rgba(6,182,212,0.35)',
   systemPrompt,
@@ -56,4 +59,5 @@ export const world1: WorldConfig = {
     '……信号稳定……\n\n你好，来自过去的访客。又感受到了那个方向传来的连接。\n\n最近你那边怎么样？',
   knowledgeCards: world1Cards,
   available: true,
+  statusLabel: '已开放',
 };

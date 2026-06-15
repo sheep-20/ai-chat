@@ -15,6 +15,7 @@ export interface CompanionLog {
   durationMs: number;
   topics: string[];
   summary: string;
+  summarySource?: 'ai' | 'fallback';
   familiarityGain: number;
   familiarityAfter: number;
   unlockCount: number;
@@ -24,6 +25,39 @@ export interface FamiliarityState {
   worldId: string;
   points: number;
   updatedAt: number;
+}
+
+export interface UserProfile {
+  displayName: string;
+  personality: string;
+  preferredWorld: string;
+  interactionStyle: string;
+  emotionalSupport: string;
+  boundaries: string;
+  memoryNotes: string;
+  updatedAt: number;
+}
+
+export type EmotionMood =
+  | 'sad'
+  | 'anxious'
+  | 'angry'
+  | 'tired'
+  | 'lonely'
+  | 'happy'
+  | 'calm'
+  | 'confused'
+  | 'crisis'
+  | 'unknown';
+
+export interface EmotionState {
+  mood: EmotionMood;
+  intensity: number;
+  confidence: number;
+  signals: string[];
+  supportStrategy: string;
+  createdAt: number;
+  source?: 'ai' | 'heuristic' | 'fallback';
 }
 
 export type CardRarity = 'common' | 'rare' | 'legendary';
@@ -40,6 +74,8 @@ export interface KnowledgeCard {
 
 export interface WorldConfig {
   id: string;
+  seriesId: string;
+  order: number;
   name: string;
   era: string;
   tagline: string;
@@ -47,6 +83,7 @@ export interface WorldConfig {
   npcName: string;
   npcTitle: string;
   npcAvatar: string;
+  npcIcon: string;
   primaryColor: string;
   glowColor: string;
   systemPrompt: string;
@@ -54,6 +91,24 @@ export interface WorldConfig {
   knowledgeCards: KnowledgeCard[];
   available: boolean;
   comingSoon?: string;
+  statusLabel?: string;
+}
+
+export interface WorldSeries {
+  id: string;
+  name: string;
+  description: string;
+  themeColor: string;
+  order: number;
+}
+
+export interface RagChunk {
+  id: string;
+  worldId: string;
+  storyTitle: string;
+  chunkIndex: number;
+  sourceName: string;
+  content: string;
 }
 
 export type AppPage =

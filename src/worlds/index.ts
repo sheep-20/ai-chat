@@ -6,9 +6,11 @@
 import { world1 } from './world1';
 import { world2 } from './world2';
 import { world3 } from './world3';
+import { world4 } from './world4';
 import type { WorldConfig } from '../types';
 
-export const WORLDS: WorldConfig[] = [world1, world2, world3];
+export const WORLDS: WorldConfig[] = [world1, world3, world2, world4]
+  .sort((a, b) => a.order - b.order);
 
 export function getWorld(id: string): WorldConfig {
   const w = WORLDS.find((w) => w.id === id);

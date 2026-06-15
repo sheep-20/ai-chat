@@ -7,6 +7,12 @@ const RARITY_LABEL: Record<string, string> = {
   legendary: '传说',
 };
 
+const WORLD3_RARITY_LABEL: Record<string, string> = {
+  common: '遗文',
+  rare: '神谕',
+  legendary: '创世',
+};
+
 const RARITY_COLOR: Record<string, string> = {
   common: '#94a3b8',
   rare: '#a78bfa',
@@ -19,6 +25,11 @@ interface Props {
 }
 
 export function UnlockToast({ card, world }: Props) {
+  const isTimeOrigin = world.id === 'world3';
+  const rarityLabel = isTimeOrigin
+    ? WORLD3_RARITY_LABEL[card?.rarity ?? 'common']
+    : RARITY_LABEL[card?.rarity ?? 'common'];
+
   return (
     <AnimatePresence>
       {card && (
@@ -50,7 +61,7 @@ export function UnlockToast({ card, world }: Props) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-xs font-mono" style={{ color: world.primaryColor }}>
-                ✦ 图鉴解锁
+                ✦ {isTimeOrigin ? '创世印记显现' : '图鉴解锁'}
               </span>
               <span
                 className="text-xs font-mono px-1.5 py-0.5 rounded-full border"
@@ -60,7 +71,7 @@ export function UnlockToast({ card, world }: Props) {
                   background: RARITY_COLOR[card.rarity] + '10',
                 }}
               >
-                {RARITY_LABEL[card.rarity]}
+                {rarityLabel}
               </span>
             </div>
             <div className="text-slate-200 font-semibold text-sm truncate">{card.title}</div>

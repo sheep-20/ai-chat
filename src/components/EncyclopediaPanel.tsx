@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { KnowledgeCard, WorldConfig } from '../types';
 
 const RARITY_LABEL: Record<string, string> = { common: '普通', rare: '稀有', legendary: '传说' };
+const WORLD3_RARITY_LABEL: Record<string, string> = { common: '遗文', rare: '神谕', legendary: '创世' };
 const RARITY_COLOR: Record<string, string> = {
   common: '#94a3b8',
   rare: '#a78bfa',
@@ -18,6 +19,12 @@ interface Props {
 export function EncyclopediaPanel({ world, unlockedIds, onClose }: Props) {
   const cards = world.knowledgeCards;
   const unlocked = cards.filter(c => unlockedIds.has(c.id));
+  const isTimeOrigin = world.id === 'world3';
+  const panelTitle = isTimeOrigin ? '创世印记' : '世界图鉴';
+  const progressLabel = isTimeOrigin ? '已显现' : '已解锁';
+  const lockedHint = isTimeOrigin
+    ? `与 ${world.npcName} 叩问第零年以显现`
+    : `与 ${world.npcName} 聊天以解锁`;
 
   return (
     <AnimatePresence>
@@ -41,9 +48,9 @@ export function EncyclopediaPanel({ world, unlockedIds, onClose }: Props) {
           style={{ borderColor: world.primaryColor + '20' }}
         >
           <div>
-            <div className="text-slate-200 font-semibold text-sm">世界图鉴</div>
+            <div className="text-slate-200 font-semibold text-sm">{panelTitle}</div>
             <div className="font-mono text-xs" style={{ color: world.primaryColor }}>
-              {unlocked.length} / {cards.length} 已解锁
+              {unlocked.length} / {cards.length} {progressLabel}
             </div>
           </div>
           <button
@@ -119,7 +126,7 @@ export function EncyclopediaPanel({ world, unlockedIds, onClose }: Props) {
                           background: RARITY_COLOR[card.rarity] + '10',
                         }}
                       >
-                        {RARITY_LABEL[card.rarity]}
+                        {isTimeOrigin ? WORLD3_RARITY_LABEL[card.rarity] : RARITY_LABEL[card.rarity]}
                       </span>
                     </div>
                     {isUnlocked ? (
@@ -128,7 +135,7 @@ export function EncyclopediaPanel({ world, unlockedIds, onClose }: Props) {
                         <p className="text-slate-400 text-xs leading-relaxed">{card.content}</p>
                       </>
                     ) : (
-                      <p className="text-slate-600 text-xs">与 {world.npcName} 聊天以解锁</p>
+                      <p className="text-slate-600 text-xs">{lockedHint}</p>
                     )}
                   </div>
                 </div>

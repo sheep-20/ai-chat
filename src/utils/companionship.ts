@@ -31,13 +31,13 @@ export function calculateFamiliarityGain(params: {
 function trimSnippet(text: string): string {
   const cleaned = text
     .replace(/https?:\/\/\S+/g, '')
-    .replace(/[【】\[\]{}()<>#*`'"“”‘’]/g, ' ')
+    .replace(/[【】[\]{}()<>#*`'"“”‘’]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
   if (!cleaned) return '';
   const short = cleaned.slice(0, 14);
-  return short.length < cleaned.length ? `${short}…` : short;
+  return short.length < cleaned.length ? `${short}...` : short;
 }
 
 export function extractCompanionTopics(params: {
@@ -66,18 +66,16 @@ export function buildCompanionSummary(params: {
   unlockCount: number;
 }): string {
   const topicLine = params.topics.length > 0
-    ? `今天主要聊了 ${params.topics.join('、')}。`
-    : '今天更多是在安静地陪伴彼此，话题慢慢靠近。';
-  const durationLine = `你们一共相处了 ${formatCompanionDuration(params.durationMs)}，熟悉度 +${params.familiarityGain}，现在是 ${params.familiarityAfter}。`;
+    ? `这次主要聊到了 ${params.topics.join('、')}。`
+    : '这次更像一次短暂的同步，话题还没有完全展开。';
   const unlockLine = params.unlockCount > 0
-    ? `这一程还记住了 ${params.unlockCount} 个新的名词。`
-    : '这一次没有新的名词被解锁，但彼此的声音已经更熟了一点。';
+    ? `途中有 ${params.unlockCount} 个新的名词被记录进档案。`
+    : '这次没有新的图鉴解锁，但彼此的声音又熟悉了一点。';
 
   return [
-    '今日陪伴总结',
     topicLine,
-    durationLine,
+    `你们相处了 ${formatCompanionDuration(params.durationMs)}，熟悉度 +${params.familiarityGain}，当前为 ${params.familiarityAfter}。`,
     unlockLine,
-    '期待下次再见时，继续把今天没说完的话说完。',
+    '等下次再见时，可以从这段没有说完的回声继续。'
   ].join('\n');
 }
